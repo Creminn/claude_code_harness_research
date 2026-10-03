@@ -1,0 +1,13 @@
+{
+  "name": "harness",
+  "version": "0.1.0",
+  "description": "Harness architecture for Claude Code: model and effort defaults, a subagent roster with per-agent model and effort, harness-driven context management, a status line and an optional Graphiti knowledge graph.",
+  "author": {
+    "name": "Creminn",
+    "url": "https://github.com/Creminn"
+  },
+  "homepage": "https://github.com/Creminn/claude_code_harness_research",
+  "repository": "https://github.com/Creminn/claude_code_harness_research",
+  "license": "MIT",
+  "keywords": ["harness", "subagents", "context", "knowledge-graph", "graphiti", "effort"]
+}

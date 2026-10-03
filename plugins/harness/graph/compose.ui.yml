@@ -1,0 +1,7 @@
+# Publishes the FalkorDB browser on localhost. It has no authentication, so it is only
+# added by "harness graph ui" and removed again by "harness graph ui --off".
+# Compose appends these ports to the ones in compose.yml.
+services:
+  graphiti:
+    ports:
+      - "127.0.0.1:${HARNESS_UI_PORT:-13000}:3000"

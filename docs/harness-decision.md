@@ -1,5 +1,7 @@
 # A layer over Claude Code: which option?
 
+> The recommended setup is implemented as an installable plugin in this repo: see the [README](../README.md).
+
 Researched 2026-10-03. Claude Code facts are checked against <https://code.claude.com/docs>.
 Facts about open-source projects (license, activity) come from GitHub on the same date.
 
@@ -58,7 +60,7 @@ Don't choose any of the three options as stated. Use a **configure-first hybrid*
    │   agents/      role → model + effort   (the routing table)              │
    │   hooks/       SessionStart · UserPromptSubmit · PreCompact · SessionEnd│
    │   skills/      workflows that load only when used                       │
-   │   .mcp.json    knowledge-graph server                                   │
+   │   graph/       knowledge-graph stack (Docker), registered when enabled  │
    └─────────────────────────────────────────────┬───────────────────────────┘
                                                  │ MCP
                                  Knowledge graph (Graphiti / cognee)
@@ -125,7 +127,7 @@ hook or a tool call asks for it.
                                                                 │ │ cost until used)
   WRITE, by hooks:  PreCompact · SubagentStop · SessionEnd      │ │
      (async: true, so the session never waits)                  ▼ │
-             transcript_path / last_assistant_message ──► extractor (cheap model, outside
+             prompt / last_assistant_message ──► extractor (cheap model, outside
                                                                      the main context)
                                                                   │ │
                                                                   ▼ │
@@ -160,12 +162,12 @@ main conversation.
 
 **Wiring.** One plugin ships both connections:
 
-- `.mcp.json` declares the graph server. Only the agents that need it get it, through the
-  `mcpServers:` field in their frontmatter: for example `architect` and `reviewer`, but not
-  `explorer`.
-- `hooks.json` holds the read and write hooks. Hooks can call the graph's MCP tool directly
-  with `"type": "mcp_tool"`. A write hook that needs an extraction step runs a script with
-  `"async": true`.
+- `harness enable` registers the graph's MCP server only when a graph mode is configured.
+  Only the agents that need it list its tools in their `tools:` field: `architect` and
+  `reviewer`, but not `explorer`. Plugin agents cannot use the `mcpServers:` field.
+- `hooks.json` holds the read and write hooks. They are `node` scripts (the cross-platform
+  pattern from the docs), and the write hooks run with `"async": true` so the session never
+  waits.
 
 Because the graph is attached at the Claude Code level, the Desktop app, VS Code and the
 terminal all share the same graph. Use the graph's own browser (FalkorDB or Neo4j) to
@@ -176,26 +178,26 @@ inspect and correct facts.
 | Part | Choice | Why |
 |---|---|---|
 | Graph engine | [Graphiti](https://github.com/getzep/graphiti) MCP server | It is **bi-temporal**: when a new fact contradicts an old one, the old one is marked no longer valid instead of being deleted. Project decisions change all the time, so this is the deciding feature. Its ingestion is built around *episodes*, which matches "one write per compaction, subagent or session". Search combines keyword, vector and graph search with no LLM call, so read hooks stay fast and free |
-| Database | FalkorDB, the default. It ships in the same container as the server, with a web UI at `:3000` | A single container. The UI lets you inspect and correct facts. Neo4j is supported if you outgrow it |
-| Extraction LLM | Anthropic, using Haiku | Ingestion makes several LLM calls per episode, so use the cheapest model. Keep `SEMAPHORE_LIMIT` low |
-| Embeddings | Sentence Transformers, running locally | Anthropic has no embedding API, and this needs no key and costs nothing. Voyage is the upgrade if recall turns out weak |
-| Namespacing | `group_id` = repo name, so each repo gets its own graph on FalkorDB. Add an optional `user` group for preferences that apply across repos | Keeps projects separate |
+| Database | FalkorDB, the default. It ships in the same container as the server. Its web UI is published only on demand (`harness graph ui`, at `127.0.0.1:13000`) | A single container. The UI has no authentication, so it stays off by default. Neo4j is supported if you outgrow it |
+| Extraction LLM | Chosen per machine at install: Anthropic Haiku (default), an OpenAI small model, or a local Ollama model (experimental) | Ingestion makes several LLM calls per episode, so use the cheapest model. Keep `SEMAPHORE_LIMIT` low |
+| Embeddings | Local Ollama `nomic-embed-text` sidecar (Anthropic and local modes), or OpenAI `text-embedding-3-small` (OpenAI mode) | Graphiti's embedders are remote APIs only (OpenAI, Azure, Gemini, Voyage), and Anthropic has none. Ollama's OpenAI-compatible endpoint fills the gap with no key. Voyage is avoided because it makes Graphiti download a 2.3 GB reranker at startup |
+| Namespacing | `group_id` = repo name plus a short hash of its remote URL, so each repo gets its own graph on FalkorDB and worktrees share it | Keeps projects separate |
 | Entity types | `Decision`, `Constraint`, `Component`, `Task`, `Bug`, `FailedAttempt`, `Convention`, `OpenQuestion`, set in the server's `config.yaml` under `graphiti.entity_types` | Points extraction at facts the code can't tell you |
-| Transport | HTTP at `http://localhost:8000/mcp/`. Claude Code supports HTTP MCP servers natively | No bridge needed |
+| Transport | HTTP at `http://127.0.0.1:18000/mcp`, bound to localhost only. Claude Code supports HTTP MCP servers natively | No bridge needed. `127.0.0.1` avoids IPv6 `::1` mismatches |
 
 **Tools used.**
 
-- Write hooks use `add_memory`. The hook first trims the transcript to user prompts,
-  decisions and outcomes, so tool output is not sent.
+- Write hooks use `add_memory`. They send only your prompts and Claude's final answers,
+  with secrets redacted, never tool output. The transcript file is not parsed, because its
+  format is internal to Claude Code.
 - Read hooks and agents use `search_memory_facts` and `search_nodes`.
-- Corrections use `delete_entity_edge` and `delete_episode`.
+- No delete tools are used in v1: in image 1.1.0 they only reach the default graph.
 - Never expose `clear_graph` to agents.
 
-**Plugin `.mcp.json`:**
-
-```json
-{ "mcpServers": { "graphiti": { "type": "http", "url": "http://localhost:8000/mcp/" } } }
-```
+**MCP registration.** Because the graph is optional, the plugin does not ship a static
+`.mcp.json`. Enabling the harness runs
+`claude mcp add --transport http graphiti http://127.0.0.1:18000/mcp` only when a graph mode
+is configured, so machines without Docker never see a failing MCP server.
 
 **Rejected options.**
 
@@ -230,76 +232,6 @@ not a graph.
 | Orchestration | [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) (automatic model tiering), [wshobson/agents](https://github.com/wshobson/agents) (agent library with models set explicitly; take only what you need) | [Ruflo / claude-flow](https://github.com/ruvnet/ruflo) is the closest to all-in-one, but heavy and full of claims. SuperClaude, BMAD and spec-kit are methods, not harnesses |
 | Model gateways | [claude-code-router](https://github.com/musistudio/claude-code-router), [LiteLLM](https://github.com/BerriAI/litellm) | Only needed for non-Anthropic models or central budgets |
 | Token hygiene | [rtk](https://github.com/rtk-ai/rtk), [claude-hud](https://github.com/jarrodwatts/claude-hud), [ccusage](https://github.com/ccusage/ccusage) | Native `/context` and `/usage` cover much of this |
-
-## Add-ons evaluated: MoFlo and Archon
-
-The two operate at different layers, so the answers differ:
-
-```
- Process layer (optional, later)   Archon: YAML DAG runs, one worktree per run, Slack/GitHub triggers
-            │ launches Claude Code
- Session layer (the plan)          Claude Code + your plugin: agents, model and effort, hooks, workflows
-            │ MCP
- Memory layer (the plan)           Graphiti
-```
-
-MoFlo would occupy the session and memory layers too, which is why it collides with the plan.
-
-### MoFlo: don't add it
-
-[eric-cielo/moflo](https://github.com/eric-cielo/moflo) is MIT-licensed, has about 18 stars, and
-started as a fork of Claude Flow.
-
-| What it does | Conflict with this plan |
-|---|---|
-| Vector memory in SQLite (HNSW, local MiniLM embeddings) | A **second memory system**. It hooks the same events as the Graphiti hooks (`SessionStart`, `PreCompact`, `UserPromptSubmit`, …): 26 hooks across 8 events. That means double injections and hooks fighting each other |
-| Learned routing: task to agent type, by vector similarity | Native subagent `description` matching already does this. Choosing a model is a separate, optional switch |
-| Gates: memory search before `Glob`, `Grep` or `Read`; a task must exist before work starts | Opinionated *blocking* that adds tool calls and can loop |
-| Context-depletion warnings | Already covered by `statusLine` and `/context` |
-| `flo init` adds a section to CLAUDE.md, writes hooks to settings.json, and registers 80+ MCP tools | Goes against keeping CLAUDE.md lean and the tool surface small |
-| Maturity | One maintainer, very few users. It inherits the Ruflo design style |
-
-**Ideas worth borrowing into the plugin:**
-
-- A *soft* "check the graph before exploring" hint: a `PreToolUse` reminder, not a block.
-- A test-to-source map.
-- Context bands (fresh, moderate, depleted) shown in the status line.
-
-### Archon: not now; maybe later as an outer layer
-
-[coleam00/Archon](https://github.com/coleam00/archon) is MIT-licensed TypeScript with about 23.6k stars.
-It was rewritten in April 2026. The old Python RAG and task-manager Archon is archived, so
-tutorials about it no longer apply.
-
-**What it adds:**
-
-- YAML DAG workflows: plan, implement, validate, review, PR.
-- A git worktree for every run.
-- `fresh_context` per node, which suits the token goal.
-- A CLI and web UI.
-- Triggers from Slack, Telegram, Discord and GitHub.
-- Codex and Pi besides Claude Code.
-- 19 bundled workflows and a `--dry-run` mode.
-
-**Why not now:**
-
-1. **It overlaps with native dynamic workflows.** Claude Code now runs saved workflow scripts
-   from `.claude/workflows/`, and a plugin can ship them. Each `agent()` call can name its own
-   model, which follows the subagent model order. Intermediate results stay in script
-   variables, not in your context, and runs can be resumed. Those scripts run inside *your*
-   plugin, with your agents, hooks and Graphiti.
-2. **Capability isolation (v0.9).** Claude nodes no longer inherit ambient skills and MCP
-   servers. Graphiti would have to be declared in every workflow. It is also unverified whether
-   plugin hooks fire inside Archon runs, so add an explicit final node that writes to the graph,
-   or Archon runs leave no trace there.
-3. **Per-node model and effort for Claude nodes** could not be confirmed in the docs that were
-   reachable.
-4. **Cost and maturity.** One review reports $5–10 per multi-agent run. There are about 300 open
-   issues against a young rewrite.
-
-**When it becomes logical:** you want unattended issue-to-PR runs in parallel, started from
-GitHub, Slack or a phone, possibly mixing in Codex. Then Archon drives runs from the outside
-and this plugin plus Graphiti stays the layer inside each session.
 
 ## When to build more yourself
 
@@ -346,4 +278,3 @@ on every machine.
 - Context window: <https://code.claude.com/docs/en/context-window>
 - Plugins: <https://code.claude.com/docs/en/plugins>
 - Agent SDK: <https://code.claude.com/docs/en/agent-sdk/typescript>, <https://code.claude.com/docs/en/agent-sdk/python>
-- Dynamic workflows: <https://code.claude.com/docs/en/workflows>

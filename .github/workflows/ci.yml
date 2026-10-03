@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit and hook tests
+        working-directory: plugins/harness
+        run: node --test
+
+  validate:
+    name: Validate plugin and lint installers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate marketplace, plugin, agents and skills
+        run: |
+          claude plugin validate . --strict
+          claude plugin validate plugins/harness --strict
+          claude plugin validate plugins/harness/agents --strict
+          claude plugin validate plugins/harness/skills --strict
+      - name: Shellcheck
+        run: shellcheck install.sh uninstall.sh
+
+  powershell:
+    name: Parse PowerShell installers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse with PowerShell 7
+        shell: pwsh
+        run: |
+          foreach ($f in 'install.ps1', 'uninstall.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Error "${f}: $_" }; exit 1 }
+          }
+      - name: Parse with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach ($f in 'install.ps1', 'uninstall.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Error "${f}: $_" }; exit 1 }
+          }
+
+  graph-smoke:
+    name: Knowledge graph smoke test (real Graphiti image)
+    runs-on: ubuntu-latest
+    env:
+      HARNESS_HOME: ${{ runner.temp }}/harness
+      HARNESS_SKIP_CLAUDE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Set up the graph (anthropic mode with a dummy key, Ollama embeddings)
+        run: echo "sk-ant-dummy-key-for-ci-smoke-test" | node plugins/harness/scripts/harness.mjs graph setup --mode anthropic --key-stdin --ollama sidecar
+      - name: Smoke test through the harness MCP client
+        run: node .github/scripts/graph-smoke.mjs
+      - name: Graph logs
+        if: always()
+        run: node plugins/harness/scripts/harness.mjs graph logs || true
+      - name: Tear down
+        if: always()
+        run: node plugins/harness/scripts/harness.mjs graph down --purge || true

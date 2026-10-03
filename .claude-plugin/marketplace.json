@@ -1,0 +1,15 @@
+{
+  "name": "claude-harness",
+  "owner": {
+    "name": "Creminn",
+    "url": "https://github.com/Creminn"
+  },
+  "description": "Harness architecture for Claude Code: model and effort routing, a subagent roster, harness-driven context management, a status line and an optional Graphiti knowledge graph.",
+  "plugins": [
+    {
+      "name": "harness",
+      "source": "./plugins/harness",
+      "description": "Model/effort defaults, subagent roster, context hooks, status line and optional Graphiti knowledge graph. Say \"enable harness architecture\" to turn it on."
+    }
+  ]
+}
