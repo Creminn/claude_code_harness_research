@@ -100,7 +100,7 @@ Other skills: `/harness:status`, `/harness:remember <decision>`, `/harness:unins
 |---|---|
 | `.claude/settings.local.json` (this project; also added to `.git/info/exclude`) or `~/.claude/settings.json` (all projects) | `model`, `effortLevel`, `autoCompactWindow`, `statusLine`, and a deny rule that keeps Claude from reading the graph keys file |
 | `~/.claude-harness/` | Harness state, the status line and CLI entry points, and graph configuration |
-| Claude Code MCP config | A `graphiti` server, only when the knowledge graph is on |
+| Claude Code MCP config | A `harness-graph` server, only when the knowledge graph is on |
 
 `autoCompactWindow` is 150,000 tokens when the graph is on, so compaction happens earlier
 because the graph keeps what it drops, and 200,000 when it is off. Your `CLAUDE.md` is never
@@ -137,7 +137,7 @@ about 800 tokens to each session for the agent and skill descriptions.
 **What comes back.**
 - At every session start, a short briefing of current decisions, constraints and open tasks.
 - After compaction, a digest of the last exchange.
-- Agents and Claude can search the graph through the `graphiti` MCP server.
+- Agents and Claude can search the graph through the `harness-graph` MCP server.
 - `"recall": true` in `~/.claude-harness/config.json` also adds related facts to each prompt.
   This is off by default.
 

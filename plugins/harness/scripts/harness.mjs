@@ -12,7 +12,7 @@ import {
 } from './lib/scopes.mjs';
 import { claude, claudeVersion } from './lib/claude.mjs';
 import {
-  DEFAULT_LLM, detectHostOllama, dockerStatus, execQuiet, graphDown, graphLogs, graphUiUrl, graphUp,
+  DEFAULT_LLM, chooseOllama, detectHostOllama, dockerStatus, execQuiet, graphDown, graphLogs, graphUiUrl, graphUp,
   missingSecret, readGraphEnv, writeGraphFiles,
 } from './lib/graph.mjs';
 import { addEpisode, graphHealth, readGraphStatus, refreshGraphStatus } from './lib/memory.mjs';
@@ -23,20 +23,32 @@ import { readSetting } from './lib/settings.mjs';
 
 const MIN_NODE_MAJOR = 20;
 
-function parseArgs(argv) {
+// Flags that never take a value, so "--stdin text" keeps "text" as an argument.
+const BOOLEAN_FLAGS = new Set([
+  'all', 'global', 'help', 'json', 'keep-model', 'keep-plugin', 'keep-project', 'key-stdin', 'new-key',
+  'no-graph-write', 'no-start', 'off', 'purge', 'stdin', 'stop-graph', 'ui', 'yes',
+]);
+
+export function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
-      const [k, inline] = a.slice(2).split('=', 2);
-      if (inline !== undefined) out[k] = inline;
-      else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) out[k] = argv[++i];
+      const eq = a.indexOf('=');
+      const k = eq === -1 ? a.slice(2) : a.slice(2, eq);
+      if (eq !== -1) out[k] = a.slice(eq + 1);
+      else if (!BOOLEAN_FLAGS.has(k) && i + 1 < argv.length && !argv[i + 1].startsWith('--')) out[k] = argv[++i];
       else out[k] = true;
     } else {
       out._.push(a);
     }
   }
   return out;
+}
+
+// --project may arrive empty (an unset CLAUDE_PROJECT_DIR): fall back to the cwd.
+function projectDirArg(args) {
+  return typeof args.project === 'string' && args.project.trim() ? args.project : process.cwd();
 }
 
 const print = (s = '') => process.stdout.write(`${s}\n`);
@@ -113,7 +125,7 @@ function shadows(projectDir) {
 }
 
 async function doctor(args) {
-  const projectDir = typeof args.project === 'string' ? args.project : process.cwd();
+  const projectDir = projectDirArg(args);
   const config = loadConfig();
   const state = loadState();
   const docker = dockerStatus();
@@ -141,7 +153,7 @@ async function doctor(args) {
     },
     project: projectInfo(projectDir),
     existingStatusLine: {
-      project: existingStatusLine('project', projectInfo(projectDir).root),
+      project: existingStatusLine('project', scope?.kind === 'project' ? scope.root : projectInfo(projectDir).root),
       global: existingStatusLine('global', projectDir),
     },
     shadows: shadows(projectDir),
@@ -162,7 +174,7 @@ async function doctor(args) {
 
 async function enable(args) {
   const kind = args.scope === 'global' || args.global ? 'global' : 'project';
-  const projectDir = typeof args.project === 'string' ? args.project : process.cwd();
+  const projectDir = projectDirArg(args);
   const result = enableScope({
     kind,
     projectDir,
@@ -195,7 +207,7 @@ async function enable(args) {
 
 async function disable(args) {
   const kind = args.scope === 'global' || args.global ? 'global' : 'project';
-  const projectDir = typeof args.project === 'string' ? args.project : process.cwd();
+  const projectDir = projectDirArg(args);
   const result = disableScope({ kind, projectDir });
   if (args['stop-graph'] && result.remainingScopes === 0) {
     try { graphDown(); result.graphStopped = true; } catch (err) { result.graphStopped = err.message; }
@@ -208,10 +220,16 @@ async function disable(args) {
 }
 
 async function promote(args) {
-  const projectDir = typeof args.project === 'string' ? args.project : process.cwd();
+  const projectDir = projectDirArg(args);
   const scope = activeScope(projectDir);
   const profile = typeof args.profile === 'string' ? args.profile : (scope?.profile || 'balanced');
-  const result = enableScope({ kind: 'global', projectDir, profile, statusLine: args.statusline === 'replace' ? 'replace' : 'auto' });
+  const result = enableScope({
+    kind: 'global',
+    projectDir,
+    profile,
+    statusLine: args.statusline === 'replace' ? 'replace' : 'auto',
+    graphWrite: scope?.graphWrite ?? !args['no-graph-write'],
+  });
   let removed = null;
   if (scope?.kind === 'project' && !args['keep-project']) removed = disableScope({ kind: 'project', projectDir });
   if (args.json) return json({ global: result, projectDisabled: removed });
@@ -221,7 +239,7 @@ async function promote(args) {
 }
 
 async function status(args) {
-  const projectDir = typeof args.project === 'string' ? args.project : process.cwd();
+  const projectDir = projectDirArg(args);
   const config = loadConfig();
   const graphState = await refreshGraphStatus(config);
   const scope = activeScope(projectDir);
@@ -274,7 +292,7 @@ async function graphSetup(args) {
   if (mode === 'anthropic' || mode === 'local') {
     config.ollama = args.ollama === 'host' || args.ollama === 'sidecar'
       ? args.ollama
-      : ((await detectHostOllama()) ? 'host' : 'sidecar');
+      : chooseOllama(process.platform, await detectHostOllama());
   }
   saveConfig(config);
 
@@ -328,7 +346,7 @@ async function remember(args) {
   const config = loadConfig();
   if (!graphEnabled(config)) fail('The knowledge graph is off. Run "harness graph setup" in a terminal first.');
   if (!(await graphHealth(config))) fail('The knowledge graph is not reachable. Run "harness graph up".');
-  const info = projectInfo(typeof args.project === 'string' ? args.project : process.cwd());
+  const info = projectInfo(projectDirArg(args));
   await addEpisode({
     group: info.groupId,
     name: `${info.name} note ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,

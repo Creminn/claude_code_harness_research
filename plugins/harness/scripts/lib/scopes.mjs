@@ -5,7 +5,7 @@ import { join, relative, isAbsolute } from 'node:path';
 import { PLUGIN_ROOT, paths, pluginVersion, toPosix } from './paths.mjs';
 import { ensureDir, writeJson, readJson } from './fsutil.mjs';
 import {
-  COMPACT_WINDOW, PROFILES, graphEnabled, loadConfig, loadState, mcpUrl, pathKey, saveState,
+  COMPACT_WINDOW, PROFILES, findProjectScope, graphEnabled, loadConfig, loadState, mcpUrl, pathKey, saveState,
 } from './state.mjs';
 import { applySettings, readSetting, restoreSettings } from './settings.mjs';
 import { gitExcludeFile, projectInfo } from './project.mjs';
@@ -66,10 +66,26 @@ function scopeRecord(state, kind, key) {
   return kind === 'global' ? state.global : state.projects[key];
 }
 
+// A status line the user set themselves, at any level that applies to this scope: a
+// project inherits the user-level one, so replacing it there must be asked about too.
 export function existingStatusLine(kind, root) {
-  const value = readSetting(settingsFileFor(kind, root), 'statusLine');
-  if (value === undefined || isOurStatusLine(value)) return null;
-  return value;
+  const files = kind === 'global'
+    ? [paths.userSettings()]
+    : [paths.projectSettings(root), join(root, '.claude', 'settings.json'), paths.userSettings()];
+  for (const file of files) {
+    const value = readSetting(file, 'statusLine');
+    if (value !== undefined && !isOurStatusLine(value)) return value;
+  }
+  return null;
+}
+
+// Where a project scope lives: an already enabled project that contains dir, else the
+// git root (or dir itself outside git).
+function resolveProject(dir, state) {
+  const enabled = findProjectScope(dir, state);
+  if (enabled) return { key: enabled.key, root: enabled.root, record: state.projects[enabled.key] };
+  const root = projectInfo(dir).root;
+  return { key: pathKey(root), root, record: state.projects[pathKey(root)] || null };
 }
 
 export function enableScope({ kind, projectDir, profile = 'balanced', statusLine = 'auto', graphWrite = true }) {
@@ -77,12 +93,14 @@ export function enableScope({ kind, projectDir, profile = 'balanced', statusLine
   if (kind !== 'project' && kind !== 'global') throw new Error('Scope must be "project" or "global"');
   const config = loadConfig();
   const graphOn = graphEnabled(config);
-  const info = projectInfo(projectDir || process.cwd());
-  const root = info.root;
-  const key = kind === 'global' ? 'global' : pathKey(root);
-  const file = settingsFileFor(kind, root);
+  const dir = projectDir || process.cwd();
   const state = loadState();
-  const previous = scopeRecord(state, kind, key);
+  const project = kind === 'project' ? resolveProject(dir, state) : null;
+  const root = project ? project.root : projectInfo(dir).root;
+  const info = projectInfo(root);
+  const key = kind === 'global' ? 'global' : project.key;
+  const file = settingsFileFor(kind, root);
+  const previous = kind === 'global' ? state.global : project.record;
 
   installShims();
 
@@ -100,25 +118,30 @@ export function enableScope({ kind, projectDir, profile = 'balanced', statusLine
   }
 
   const applied = applySettings(file, desired, [envDenyRule()], previous?.applied);
-  const excluded = kind === 'project' && info.isGit ? excludeSettingsFile(root) : false;
-
-  let mcp = { ok: false, skipped: true };
-  if (graphOn) mcp = registerGraphMcp(kind, root, mcpUrl(config));
-  else if (previous?.mcpRegistered) unregisterGraphMcp(kind, root);
-
   const record = {
     root: kind === 'global' ? null : toPosix(root),
     settingsFile: toPosix(file),
     profile,
     graphWrite,
-    mcpRegistered: Boolean(mcp.ok),
+    mcpRegistered: Boolean(previous?.mcpRegistered),
     enabledAt: previous?.enabledAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     applied,
   };
-  if (kind === 'global') state.global = record;
-  else state.projects[key] = record;
-  saveState(state);
+  // Record what was changed before anything else can fail, so disable can always restore it.
+  const save = () => {
+    if (kind === 'global') state.global = record;
+    else state.projects[key] = record;
+    saveState(state);
+  };
+  save();
+
+  const excluded = kind === 'project' && info.isGit ? excludeSettingsFile(root) : false;
+  let mcp = { ok: false, skipped: true };
+  if (graphOn) mcp = registerGraphMcp(kind, root, mcpUrl(config));
+  else if (previous?.mcpRegistered) unregisterGraphMcp(kind, root);
+  record.mcpRegistered = graphOn ? Boolean(mcp.ok) : false;
+  save();
 
   return {
     kind,
@@ -138,9 +161,7 @@ export function disableScope({ kind, projectDir }) {
   let key = 'global';
   let record = state.global;
   if (kind === 'project') {
-    const root = projectInfo(projectDir || process.cwd()).root;
-    key = pathKey(root);
-    record = state.projects[key];
+    ({ key, record } = resolveProject(projectDir || process.cwd(), state));
   }
   if (!record) return { kind, found: false };
   const result = existsSync(record.settingsFile) ? restoreSettings(record.settingsFile, record.applied) : { restored: [], kept: [] };
@@ -155,17 +176,26 @@ export function countScopes(state = loadState()) {
   return (state.global ? 1 : 0) + Object.keys(state.projects).length;
 }
 
-// Re-applies every enabled scope, e.g. after the graph mode changed: the compact window
-// and the MCP registration depend on whether the graph is on.
+// After the graph mode changes, update only what depends on it in every enabled scope:
+// the compaction window and the MCP registration. Model, effort and status line are left
+// as they are, including any value the user changed since enabling.
 export function resyncScopes() {
+  const config = loadConfig();
+  const graphOn = graphEnabled(config);
   const state = loadState();
-  const results = [];
-  if (state.global) {
-    results.push(enableScope({ kind: 'global', projectDir: process.cwd(), profile: state.global.profile, graphWrite: state.global.graphWrite }));
+  const scopes = [
+    ...(state.global ? [['global', 'global', state.global]] : []),
+    ...Object.entries(state.projects).map(([key, record]) => ['project', key, record]),
+  ];
+  for (const [kind, , record] of scopes) {
+    if (kind === 'project' && (!record.root || !existsSync(record.root))) continue;
+    const window = graphOn ? COMPACT_WINDOW.withGraph : COMPACT_WINDOW.withoutGraph;
+    record.applied = applySettings(record.settingsFile, { autoCompactWindow: window }, [], record.applied);
+    const root = record.root || process.cwd();
+    if (graphOn) record.mcpRegistered = registerGraphMcp(kind, root, mcpUrl(config)).ok;
+    else if (record.mcpRegistered) { unregisterGraphMcp(kind, root); record.mcpRegistered = false; }
+    record.updatedAt = new Date().toISOString();
   }
-  for (const record of Object.values(state.projects)) {
-    if (!record.root || !existsSync(record.root)) continue;
-    results.push(enableScope({ kind: 'project', projectDir: record.root, profile: record.profile, graphWrite: record.graphWrite }));
-  }
-  return results;
+  saveState(state);
+  return scopes.length;
 }

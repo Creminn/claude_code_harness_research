@@ -196,7 +196,7 @@ inspect and correct facts.
 
 **MCP registration.** Because the graph is optional, the plugin does not ship a static
 `.mcp.json`. Enabling the harness runs
-`claude mcp add --transport http graphiti http://127.0.0.1:18000/mcp` only when a graph mode
+`claude mcp add --transport http harness-graph http://127.0.0.1:18000/mcp` only when a graph mode
 is configured, so machines without Docker never see a failing MCP server.
 
 **Rejected options.**

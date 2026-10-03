@@ -30,9 +30,9 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --mode) MODE="${2:-}"; shift 2 ;;
+    --mode) [ $# -ge 2 ] || { echo "--mode needs a value" >&2; exit 1; }; MODE="$2"; shift 2 ;;
     --mode=*) MODE="${1#*=}"; shift ;;
-    --ref) REF="${2:-}"; shift 2 ;;
+    --ref) [ $# -ge 2 ] || { echo "--ref needs a value" >&2; exit 1; }; REF="$2"; shift 2 ;;
     --ref=*) REF="${1#*=}"; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -117,7 +117,7 @@ INSTALL_PATH="$(claude plugin list --json | node -e '
   let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
     const p = JSON.parse(s).find((x) => x.id === "harness@claude-harness");
     if (p && p.installPath) console.log(p.installPath);
-  });')"
+  });' || true)"
 if [ -z "$INSTALL_PATH" ] || [ ! -f "$INSTALL_PATH/scripts/harness.mjs" ]; then
   say "Could not find the installed plugin. Run: claude plugin list"
   exit 1

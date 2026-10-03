@@ -1,7 +1,7 @@
 // Reads and writes the Graphiti knowledge graph over MCP, and caches what hooks need so
 // the synchronous hook path never touches the network.
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { paths, pluginVersion } from './paths.mjs';
 import { readJson, writeFileAtomic, writeJson, ensureDir } from './fsutil.mjs';
 import { loadConfig, mcpUrl } from './state.mjs';
@@ -41,7 +41,8 @@ export async function refreshGraphStatus(config = loadConfig()) {
   }
   const healthy = await graphHealth(config);
   const previous = readGraphStatus();
-  const state = healthy ? 'healthy' : (previous?.state === 'starting' ? 'starting' : 'down');
+  const startingRecently = previous?.state === 'starting' && Date.now() - Date.parse(previous.at || 0) < 15 * 60 * 1000;
+  const state = healthy ? 'healthy' : (startingRecently ? 'starting' : 'down');
   writeGraphStatus(state, healthy ? '' : 'Graph is not reachable. Run "harness graph up" or start Docker.');
   return state;
 }
@@ -152,7 +153,10 @@ function digestFile(sessionId) {
 }
 
 export function writeDigest(sessionId, text) {
-  if (!text) return;
+  if (!text) {
+    rmSync(digestFile(sessionId), { force: true });
+    return;
+  }
   ensureDir(paths.digests(), 0o700);
   writeFileAtomic(digestFile(sessionId), text, { mode: 0o600 });
 }

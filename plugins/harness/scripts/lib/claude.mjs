@@ -23,14 +23,17 @@ export function claudeVersion() {
 
 const MCP_SCOPE = { project: 'local', global: 'user' };
 
+// Harness-specific name, so a "graphiti" server the user configured is never touched.
+export const MCP_SERVER = 'harness-graph';
+
 export function registerGraphMcp(kind, root, url) {
   const scope = MCP_SCOPE[kind];
-  claude(['mcp', 'remove', 'graphiti', '--scope', scope], { cwd: root });
-  const res = claude(['mcp', 'add', '--transport', 'http', '--scope', scope, 'graphiti', url], { cwd: root });
+  claude(['mcp', 'remove', MCP_SERVER, '--scope', scope], { cwd: root });
+  const res = claude(['mcp', 'add', '--transport', 'http', '--scope', scope, MCP_SERVER, url], { cwd: root });
   return res.status === 0 ? { ok: true } : { ok: false, error: (res.stderr || res.stdout).trim().slice(0, 300) };
 }
 
 export function unregisterGraphMcp(kind, root) {
-  const res = claude(['mcp', 'remove', 'graphiti', '--scope', MCP_SCOPE[kind]], { cwd: root });
+  const res = claude(['mcp', 'remove', MCP_SERVER, '--scope', MCP_SCOPE[kind]], { cwd: root });
   return res.status === 0;
 }

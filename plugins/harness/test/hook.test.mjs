@@ -52,7 +52,7 @@ test('graph flow: buffer, flush, briefing, digest and orphans', async (t) => {
   assert.match(ctx, /token bucket/);
   assert.ok(!ctx.includes('Old fact'));
   assert.match(ctx, /\[Task\] Migrate auth/);
-  assert.match(ctx, /mcp__graphiti__search_memory_facts/);
+  assert.match(ctx, /mcp__harness-graph__search_memory_facts/);
 
   // Prompts and answers are buffered with secrets redacted; slash commands are skipped.
   await hook('prompt', { cwd: repo, session_id: 's1', prompt: 'Use key sk-ant-abcdefghijklmnop123 for staging' }, sb);

@@ -21,9 +21,11 @@ export function applySettings(file, desired, denyRules = [], previous = undefine
   const applied = { fileExisted, keys: { ...(previous?.keys || {}) }, denyAdded: [...(previous?.denyAdded || [])] };
 
   for (const [key, value] of Object.entries(desired)) {
-    if (!(key in applied.keys)) {
-      applied.keys[key] = { hadPrev: key in settings, prev: settings[key] };
-    }
+    const record = applied.keys[key];
+    // Snapshot what the key holds now, unless it still holds the value we wrote last time:
+    // a value the user set in between becomes the one restored on disable.
+    const stillOurs = record && key in settings && isDeepStrictEqual(settings[key], record.value);
+    if (!stillOurs) applied.keys[key] = { hadPrev: key in settings, prev: settings[key] };
     applied.keys[key].value = value;
     settings[key] = value;
   }

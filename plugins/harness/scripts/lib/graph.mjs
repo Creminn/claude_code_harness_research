@@ -1,6 +1,7 @@
 // Docker lifecycle and configuration for the optional Graphiti knowledge graph.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { PLUGIN_ROOT, paths } from './paths.mjs';
 import { ensureDir, tryLock, writeFileAtomic } from './fsutil.mjs';
@@ -11,6 +12,7 @@ export const PROJECT_NAME = 'claude-harness';
 export const GRAPHITI_IMAGE_TAG = '1.1.0';
 export const OLLAMA_IMAGE_TAG = '0.35.1';
 export const EMBED_MODEL = 'nomic-embed-text';
+export const ALL_VOLUMES = ['claude-harness-graph-nomic-768', 'claude-harness-graph-openai-1536', 'claude-harness-ollama'];
 export const DEFAULT_LLM = {
   anthropic: 'claude-haiku-4-5',
   openai: 'gpt-5-mini',
@@ -144,8 +146,9 @@ export function readGraphEnv() {
   try { return parseEnv(readFileSync(paths.graphEnv(), 'utf8')); } catch { return {}; }
 }
 
-export function renderEnv(config, secrets) {
+export function renderEnv(config, secrets, extra = {}) {
   const env = {
+    ...extra,
     HARNESS_EMBEDDER: embedderId(config),
     HARNESS_MCP_PORT: String(config.mcpPort),
     HARNESS_UI_PORT: String(config.uiPort),
@@ -164,9 +167,14 @@ export function writeGraphFiles(config, secrets = readGraphEnv()) {
   copyFileSync(join(PLUGIN_ROOT, 'graph', 'compose.yml'), join(dir, 'compose.yml'));
   copyFileSync(join(PLUGIN_ROOT, 'graph', 'compose.ui.yml'), join(dir, 'compose.ui.yml'));
   ensureDir(join(dir, 'patches'));
-  copyFileSync(join(PLUGIN_ROOT, 'graph', 'patches', 'sitecustomize.py'), join(dir, 'patches', 'sitecustomize.py'));
-  writeFileAtomic(join(dir, 'config.yaml'), renderGraphitiConfig(config));
-  writeFileAtomic(paths.graphEnv(), renderEnv(config, secrets), { mode: 0o600 });
+  const patch = readFileSync(join(PLUGIN_ROOT, 'graph', 'patches', 'sitecustomize.py'), 'utf8');
+  writeFileAtomic(join(dir, 'patches', 'sitecustomize.py'), patch);
+  const configYaml = renderGraphitiConfig(config);
+  writeFileAtomic(join(dir, 'config.yaml'), configYaml);
+  // Compose recreates a container only when its own config or environment changes, not
+  // when a mounted file does. The hash makes a new mode, model or patch take effect.
+  const configHash = createHash('sha256').update(configYaml).update(patch).digest('hex').slice(0, 16);
+  writeFileAtomic(paths.graphEnv(), renderEnv(config, secrets, { HARNESS_CONFIG_HASH: configHash }), { mode: 0o600 });
 }
 
 export function missingSecret(config, secrets = readGraphEnv()) {
@@ -199,7 +207,7 @@ function composeArgs(config, { ui = false } = {}) {
 }
 
 function docker(args, { quiet = false } = {}) {
-  const res = spawnSync('docker', args, { stdio: quiet ? 'pipe' : 'inherit', encoding: 'utf8', windowsHide: true });
+  const res = spawnSync('docker', args, { stdio: quiet ? 'pipe' : ['ignore', 'inherit', 'inherit'], encoding: 'utf8', windowsHide: true });
   if (res.error) throw res.error;
   if (res.status !== 0) {
     const detail = quiet ? `${res.stderr || ''}`.trim().slice(-500) : '';
@@ -279,6 +287,9 @@ export function graphDown({ purge = false } = {}) {
   const args = [...composeArgs({ ...config, graphMode: config.graphMode === 'off' ? 'anthropic' : config.graphMode }), 'down'];
   if (purge) args.push('--volumes');
   docker(args);
+  if (purge) {
+    for (const volume of ALL_VOLUMES) spawnSync('docker', ['volume', 'rm', volume], { stdio: 'ignore', windowsHide: true });
+  }
   writeGraphStatus(config.graphMode === 'off' ? 'off' : 'down', 'Stopped');
   return true;
 }
@@ -290,6 +301,12 @@ export function graphLogs(lines = 200) {
 
 export function graphUiUrl(config = loadConfig()) {
   return `http://127.0.0.1:${config.uiPort}`;
+}
+
+// On Linux, Ollama listens on 127.0.0.1 by default, which containers cannot reach, so the
+// host's Ollama is only chosen automatically under Docker Desktop (macOS, Windows).
+export function chooseOllama(platform, hostAvailable) {
+  return hostAvailable && (platform === 'darwin' || platform === 'win32') ? 'host' : 'sidecar';
 }
 
 export async function detectHostOllama() {

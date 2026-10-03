@@ -15,11 +15,6 @@ param(
     [switch]$Yes
 )
 
-# Not 'Stop': in Windows PowerShell 5.1 that turns any stderr output of a native command
-# (for example "docker info" when Docker is not running) into a terminating error, even when
-# redirected. Native commands are checked through $LASTEXITCODE instead.
-$ErrorActionPreference = 'Continue'
-$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $Repo = if ($env:HARNESS_REPO) { $env:HARNESS_REPO } else { 'Creminn/claude_code_harness_research' }
 $Marketplace = 'claude-harness'
@@ -58,6 +53,13 @@ function Setup-WithKey([string]$GraphMode, [string]$VarName, [string]$Harness) {
 # Everything runs inside a function so that a failure returns instead of closing the
 # PowerShell window (this script is usually run with "irm | iex").
 function Install-Harness {
+    # Set here, not at script level: "irm | iex" runs in the caller's session, and these
+    # would otherwise stay changed after the installer finishes.
+    # Not 'Stop': in Windows PowerShell 5.1 that turns any stderr output of a native command
+    # (for example "docker info" when Docker is not running) into a terminating error, even
+    # when redirected. Native commands are checked through $LASTEXITCODE instead.
+    $ErrorActionPreference = 'Continue'
+    $OutputEncoding = [System.Text.Encoding]::UTF8
     Write-Host 'claude-harness installer'
     Write-Host ''
 

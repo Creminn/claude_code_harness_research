@@ -15,7 +15,7 @@ export function delegationPolicy({ graph, group }) {
   if (graph) {
     lines.push(
       'State important outcomes explicitly, e.g. "Decision: <what> because <why>", "Constraint: ...", "Failed attempt: ...", so the harness records them in the knowledge graph automatically (do not ask the user whether to save them).',
-      `Project memory below comes from the knowledge graph. Check it before re-investigating something. For deeper recall use the \`mcp__graphiti__search_memory_facts\` tool with group_ids ["${group}"].`,
+      `Project memory below comes from the knowledge graph. Check it before re-investigating something. For deeper recall use the \`mcp__harness-graph__search_memory_facts\` tool with group_ids ["${group}"].`,
     );
   }
   return lines.join('\n');

@@ -118,6 +118,7 @@ const handlers = {
 
   async 'pre-compact'(input, scope, config) {
     if (!canWriteGraph(scope, config)) return;
+    // An empty digest also clears the previous one, so an old exchange is never re-injected.
     writeDigest(input.session_id, buildDigest(readEntries(bufferPath(input.session_id))));
     if (readGraphStatus()?.state !== 'healthy') return;
     const claimed = claimBuffer(input.session_id);

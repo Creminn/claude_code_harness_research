@@ -3,7 +3,7 @@ name: reviewer
 description: Reviews changes before they are committed. Use after implementing a change, before committing or opening a pull request, to find correctness bugs, missed edge cases and violations of earlier project decisions. Read-only.
 model: opus
 effort: high
-tools: Read, Grep, Glob, Bash, mcp__graphiti__search_memory_facts, mcp__graphiti__search_nodes
+tools: Read, Grep, Glob, Bash, mcp__harness-graph__search_memory_facts, mcp__harness-graph__search_nodes
 color: orange
 ---
 You review a change for correctness. Use Bash only for read-only commands such as `git diff`, `git log` and `git status`; never modify files or run commands that change state.

@@ -69,8 +69,18 @@ export function writeJson(file, value, opts) {
   writeFileAtomic(file, `${JSON.stringify(value, null, 2)}\n`, opts);
 }
 
-// A lock is a directory: mkdir is atomic on every platform. Stale locks (a crashed
-// holder) are broken after staleMs.
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+// A lock is a directory (mkdir is atomic on every platform) holding the owner's pid. It is
+// broken when the owner is no longer running, or after staleMs as a last resort.
 export function tryLock(name, { staleMs = 10 * 60 * 1000 } = {}) {
   const dir = join(ensureDir(paths.locks()), `${name}.lock`);
   try {
@@ -78,11 +88,15 @@ export function tryLock(name, { staleMs = 10 * 60 * 1000 } = {}) {
   } catch (err) {
     if (err.code !== 'EEXIST') throw err;
     let age = 0;
+    let pid = null;
     try { age = Date.now() - statSync(dir).mtimeMs; } catch { /* vanished */ }
-    if (age < staleMs) return null;
+    try { pid = Number(readFileSync(join(dir, 'pid'), 'utf8')); } catch { /* not written yet */ }
+    const ownerGone = pid !== null && !processAlive(pid);
+    if (!ownerGone && age < staleMs) return null;
     rmSync(dir, { recursive: true, force: true });
     try { mkdirSync(dir); } catch { return null; }
   }
+  try { writeFileSync(join(dir, 'pid'), String(process.pid)); } catch { /* lock still held */ }
   return () => rmSync(dir, { recursive: true, force: true });
 }
 

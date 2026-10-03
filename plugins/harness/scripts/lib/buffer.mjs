@@ -3,7 +3,7 @@
 // Hooks can run concurrently (async Stop hooks overlap), so a flush first *claims* the
 // buffer by renaming it; only the process that wins the rename sends it. SessionEnd only
 // renames the buffer to "closed", and the next session's async start hook flushes leftovers.
-import { appendFileSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './paths.mjs';
 import { ensureDir, renameWithRetry } from './fsutil.mjs';
@@ -61,14 +61,17 @@ export function shouldFlush(stats) {
   return stats.bytes >= FLUSH_BYTES || stats.turns >= FLUSH_TURNS;
 }
 
+// Rename keeps the old modification time; refresh it so a fresh claim is never taken for
+// a stale one by another process.
 function renameIfExists(from, to) {
   try {
     renameWithRetry(from, to);
-    return to;
   } catch (err) {
     if (err.code === 'ENOENT') return null;
     throw err;
   }
+  try { const now = new Date(); utimesSync(to, now, now); } catch { /* best effort */ }
+  return to;
 }
 
 export function claimBuffer(sessionId) {
