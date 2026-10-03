@@ -67,13 +67,14 @@ jobs:
     name: Knowledge graph smoke test (real Graphiti image)
     runs-on: ubuntu-latest
     env:
-      HARNESS_HOME: ${{ runner.temp }}/harness
       HARNESS_SKIP_CLAUDE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Use a temporary harness home
+        run: echo "HARNESS_HOME=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
       - name: Set up the graph (anthropic mode with a dummy key, Ollama embeddings)
         run: echo "sk-ant-dummy-key-for-ci-smoke-test" | node plugins/harness/scripts/harness.mjs graph setup --mode anthropic --key-stdin --ollama sidecar
       - name: Smoke test through the harness MCP client
