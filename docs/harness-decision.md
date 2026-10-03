@@ -108,6 +108,69 @@ Return file paths with line numbers and a summary of at most 5 lines. Never past
 The principle: **the harness writes memory and reads it back through hooks.** You don't
 rely on the model remembering to save or recall things.
 
+### Where the knowledge graph sits
+
+The graph runs **beside** Claude Code, not inside it. It is a local service, connected at the
+plugin level. It is never loaded into context whole. A slice of it enters context only when a
+hook or a tool call asks for it.
+
+```
+                    ┌──────────────── Claude Code session ────────────────┐
+                    │  context window = working memory (gets compacted)   │
+                    │      ▲ briefing        ▲ top-k facts      │ ▲       │
+                    └──────┼─────────────────┼──────────────────┼─┼───────┘
+  READ, pushed by hooks:   SessionStart      UserPromptSubmit   │ │ READ, pulled by the model:
+  (deterministic,          (startup/resume/  (optional,         │ │ MCP tools search_facts /
+   size-capped)             compact/clear)    ≤ ~500 tokens)    │ │ get_entity (deferred: no
+                                                                │ │ cost until used)
+  WRITE, by hooks:  PreCompact · SubagentStop · SessionEnd      │ │
+     (async: true, so the session never waits)                  ▼ │
+             transcript_path / last_assistant_message ──► extractor (cheap model, outside
+                                                                     the main context)
+                                                                  │ │
+                                                                  ▼ │
+                              Knowledge graph service (local Docker, one group per repo)
+```
+
+**Memory tiers.** Each tier has one job, and they don't overlap:
+
+| Tier | Holds | Written by | Loaded |
+|---|---|---|---|
+| Context window | The current task | The session | Always, then compacted |
+| CLAUDE.md / `.claude/rules/` | **Rules**: how to work here | You | Every session, or by path |
+| Auto memory (`MEMORY.md`) | Claude's short notes on your preferences | Claude | First 200 lines |
+| **Knowledge graph** | **Facts that code doesn't show**: decisions and their reasons, constraints, failed attempts, bug causes, task state, open questions | **Hooks plus an extractor** | **Only the slice a hook or query asks for** |
+| Code and git | What the system *is* | You and the agents | Read on demand (grep, explorer agent) |
+
+**What goes in and what stays out.**
+
+- **In:** `Decision` (what, why, date, which decision it supersedes), `Constraint`, `Component`
+  (modules only, not every function), `Task` (status), `Bug` (symptom, root cause, the commit that
+  fixed it), `FailedAttempt`, `Convention`, `OpenQuestion`.
+  Relations: `depends_on`, `decided_because`, `supersedes`, `fixed_by`, `blocks`.
+- **Out:** code, whole transcripts, anything grep or git can answer, and secrets.
+  A code-structure graph such as codebase-memory-mcp is a separate tool, because it can be
+  regenerated from the code at any time.
+
+**Why this placement serves the token goal.** `PreCompact` saves facts to the graph and
+`SessionStart(compact)` brings back a short briefing, so compaction no longer loses them.
+That makes it safe to compact *earlier*, with a lower auto-compact window, and to keep the
+working context small. The tokens spent on extraction go to a cheap model, outside the
+main conversation.
+
+**Wiring.** One plugin ships both connections:
+
+- `.mcp.json` declares the graph server. Only the agents that need it get it, through the
+  `mcpServers:` field in their frontmatter: for example `architect` and `reviewer`, but not
+  `explorer`.
+- `hooks.json` holds the read and write hooks. Hooks can call the graph's MCP tool directly
+  with `"type": "mcp_tool"`. A write hook that needs an extraction step runs a script with
+  `"async": true`.
+
+Because the graph is attached at the Claude Code level, the Desktop app, VS Code and the
+terminal all share the same graph. Use the graph's own browser (FalkorDB or Neo4j) to
+inspect and correct facts.
+
 ### Knowledge graph options
 
 | Option | Type | Infrastructure | When to choose it |
