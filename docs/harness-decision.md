@@ -171,6 +171,44 @@ Because the graph is attached at the Claude Code level, the Desktop app, VS Code
 terminal all share the same graph. Use the graph's own browser (FalkorDB or Neo4j) to
 inspect and correct facts.
 
+### Chosen: Graphiti MCP server on FalkorDB
+
+| Part | Choice | Why |
+|---|---|---|
+| Graph engine | [Graphiti](https://github.com/getzep/graphiti) MCP server | It is **bi-temporal**: when a new fact contradicts an old one, the old one is marked no longer valid instead of being deleted. Project decisions change all the time, so this is the deciding feature. Its ingestion is built around *episodes*, which matches "one write per compaction, subagent or session". Search combines keyword, vector and graph search with no LLM call, so read hooks stay fast and free |
+| Database | FalkorDB, the default. It ships in the same container as the server, with a web UI at `:3000` | A single container. The UI lets you inspect and correct facts. Neo4j is supported if you outgrow it |
+| Extraction LLM | Anthropic, using Haiku | Ingestion makes several LLM calls per episode, so use the cheapest model. Keep `SEMAPHORE_LIMIT` low |
+| Embeddings | Sentence Transformers, running locally | Anthropic has no embedding API, and this needs no key and costs nothing. Voyage is the upgrade if recall turns out weak |
+| Namespacing | `group_id` = repo name, so each repo gets its own graph on FalkorDB. Add an optional `user` group for preferences that apply across repos | Keeps projects separate |
+| Entity types | `Decision`, `Constraint`, `Component`, `Task`, `Bug`, `FailedAttempt`, `Convention`, `OpenQuestion`, set in the server's `config.yaml` under `graphiti.entity_types` | Points extraction at facts the code can't tell you |
+| Transport | HTTP at `http://localhost:8000/mcp/`. Claude Code supports HTTP MCP servers natively | No bridge needed |
+
+**Tools used.**
+
+- Write hooks use `add_memory`. The hook first trims the transcript to user prompts,
+  decisions and outcomes, so tool output is not sent.
+- Read hooks and agents use `search_memory_facts` and `search_nodes`.
+- Corrections use `delete_entity_edge` and `delete_episode`.
+- Never expose `clear_graph` to agents.
+
+**Plugin `.mcp.json`:**
+
+```json
+{ "mcpServers": { "graphiti": { "type": "http", "url": "http://localhost:8000/mcp/" } } }
+```
+
+**Rejected options.**
+
+- **cognee:** a good graph-plus-vector store with an official Claude Code plugin, but it does
+  not invalidate outdated facts over time. Its verbs (`remember`, `recall`, `improve`,
+  `forget`) are built for the model calling them, not for hooks.
+- **MCP memory server:** no deduplication, no semantic search and no time model, and the
+  model has to write to it by hand.
+- **claude-mem:** not a graph.
+- **mem0:** built for chat personalization.
+
+Revisit cognee if you later want documents such as PDFs and wikis in the same memory.
+
 ### Knowledge graph options
 
 | Option | Type | Infrastructure | When to choose it |
