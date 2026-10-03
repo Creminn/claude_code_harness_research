@@ -1,0 +1,40 @@
+# Knowledge graph for claude-harness: Graphiti MCP server with FalkorDB in one container,
+# plus an optional Ollama sidecar for local embeddings (and a local LLM in "local" mode).
+# Managed by "harness graph up|down"; values come from the generated .env next to this file.
+services:
+  graphiti:
+    image: zepai/knowledge-graph-mcp:${GRAPHITI_IMAGE_TAG:-1.1.0}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      GRAPHITI_TELEMETRY_ENABLED: "false"
+      SEMAPHORE_LIMIT: "5"
+      BROWSER: "1"
+      FALKORDB_URI: "redis://localhost:6379"
+      FALKORDB_DATABASE: "default_db"
+      # Loads patches/sitecustomize.py (an Anthropic SDK compatibility shim).
+      PYTHONPATH: "/app/harness-patches"
+    volumes:
+      - graph_data:/var/lib/falkordb/data
+      - ./config.yaml:/app/mcp/config/config.yaml:ro
+      - ./patches:/app/harness-patches:ro
+    ports:
+      # Localhost only. The FalkorDB port (6379) is never published.
+      - "127.0.0.1:${HARNESS_MCP_PORT:-18000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-0.35.1}
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+
+volumes:
+  # One volume per embedding model: vectors of different sizes must never mix.
+  graph_data:
+    name: claude-harness-graph-${HARNESS_EMBEDDER:-nomic-768}
+  ollama_models:
+    name: claude-harness-ollama

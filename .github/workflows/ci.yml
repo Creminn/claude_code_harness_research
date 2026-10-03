@@ -1,0 +1,181 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      local_model:
+        description: Ollama model for the local-mode end-to-end job
+        default: qwen2.5:7b
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit and hook tests
+        working-directory: plugins/harness
+        run: node --test
+
+  validate:
+    name: Validate plugin and lint installers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate marketplace, plugin, agents and skills
+        run: |
+          claude plugin validate . --strict
+          claude plugin validate plugins/harness --strict
+          claude plugin validate plugins/harness/agents --strict
+          claude plugin validate plugins/harness/skills --strict
+      - name: Shellcheck
+        run: shellcheck install.sh uninstall.sh
+
+  powershell:
+    name: Parse PowerShell installers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse with PowerShell 7
+        shell: pwsh
+        run: |
+          foreach ($f in 'install.ps1', 'uninstall.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Error "${f}: $_" }; exit 1 }
+          }
+      - name: Parse with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach ($f in 'install.ps1', 'uninstall.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Error "${f}: $_" }; exit 1 }
+          }
+
+  installer-e2e:
+    name: Installer end to end (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Use isolated config directories and install from this checkout
+        shell: bash
+        run: |
+          {
+            echo "CLAUDE_CONFIG_DIR=$RUNNER_TEMP/claude"
+            echo "HARNESS_HOME=$RUNNER_TEMP/harness"
+            echo "HARNESS_SOURCE=$GITHUB_WORKSPACE"
+            echo "TEST_REPO=$RUNNER_TEMP/repo"
+          } >> "$GITHUB_ENV"
+      - name: Install (bash)
+        if: runner.os != 'Windows'
+        run: bash install.sh --mode off --yes
+      - name: Install (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\install.ps1 -Mode off -Yes
+      - name: Enable in a project
+        shell: bash
+        run: |
+          mkdir -p "$TEST_REPO"
+          git -C "$TEST_REPO" init -q
+          node "$HARNESS_HOME/bin/harness.mjs" enable --scope project --profile economy --project "$TEST_REPO"
+          node .github/scripts/installer-check.mjs enabled "$TEST_REPO"
+      - name: Disable
+        shell: bash
+        run: |
+          node "$HARNESS_HOME/bin/harness.mjs" disable --scope project --project "$TEST_REPO"
+          node .github/scripts/installer-check.mjs disabled "$TEST_REPO"
+      - name: Uninstall (bash)
+        if: runner.os != 'Windows'
+        run: bash uninstall.sh
+      - name: Uninstall (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\uninstall.ps1
+      - name: The plugin is gone
+        shell: bash
+        run: node .github/scripts/installer-check.mjs uninstalled
+
+  graph-smoke:
+    name: Knowledge graph smoke test (real Graphiti image)
+    runs-on: ubuntu-latest
+    env:
+      HARNESS_SKIP_CLAUDE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Use a temporary harness home
+        run: echo "HARNESS_HOME=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: Set up the graph (anthropic mode with a dummy key, Ollama embeddings)
+        run: echo "sk-ant-dummy-key-for-ci-smoke-test" | node plugins/harness/scripts/harness.mjs graph setup --mode anthropic --key-stdin --ollama sidecar
+      - name: Smoke test through the harness MCP client
+        run: node .github/scripts/graph-smoke.mjs
+      - name: Extraction reaches the Anthropic API (the SDK shim works)
+        run: |
+          sleep 15
+          node plugins/harness/scripts/harness.mjs graph logs > graph.log 2>&1 || true
+          grep -E "anthropic|Failed to process" graph.log || true
+          if grep -q "unexpected keyword argument" graph.log; then
+            echo "::error::Graphiti's Anthropic client is incompatible with the bundled SDK"
+            exit 1
+          fi
+      - name: Graph logs
+        if: always()
+        run: node plugins/harness/scripts/harness.mjs graph logs || true
+      - name: Tear down
+        if: always()
+        run: node plugins/harness/scripts/harness.mjs graph down --purge || true
+
+  # Slow (CPU-only extraction) and model-dependent, so it only runs when started by hand
+  # from the Actions tab: small models extract irrelevant facts and fail this check.
+  graph-local:
+    name: Knowledge graph end to end, local mode (experimental)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HARNESS_SKIP_CLAUDE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Use a temporary harness home
+        run: echo "HARNESS_HOME=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: Set up the graph in local mode with a small model
+        run: node plugins/harness/scripts/harness.mjs graph setup --mode local --ollama sidecar --llm-model "${{ inputs.local_model }}"
+      - name: Write, extract and search
+        run: node .github/scripts/graph-smoke.mjs --expect-extraction
+      - name: Graph logs
+        if: always()
+        run: node plugins/harness/scripts/harness.mjs graph logs || true
+      - name: Tear down
+        if: always()
+        run: node plugins/harness/scripts/harness.mjs graph down --purge || true
