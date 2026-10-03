@@ -78,7 +78,10 @@ Open Claude Code in a project and say:
 
 > enable harness architecture
 
-Claude asks two things:
+The first time, Claude Code asks permission to run the `harness:enable` skill and its
+`node` commands. Approve them; choosing "don't ask again" avoids the prompt next time.
+
+Claude then asks two things:
 - **Scope.** "This project" is the best first try. "All projects" applies it everywhere.
 - **Profile.** Balanced or Economy.
 
