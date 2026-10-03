@@ -15,7 +15,10 @@ param(
     [switch]$Yes
 )
 
-$ErrorActionPreference = 'Stop'
+# Not 'Stop': in Windows PowerShell 5.1 that turns any stderr output of a native command
+# (for example "docker info" when Docker is not running) into a terminating error, even when
+# redirected. Native commands are checked through $LASTEXITCODE instead.
+$ErrorActionPreference = 'Continue'
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $Repo = if ($env:HARNESS_REPO) { $env:HARNESS_REPO } else { 'Creminn/claude_code_harness_research' }
