@@ -93,6 +93,8 @@ function Install-Harness {
     # 2. Plugin ------------------------------------------------------------------
     $source = $Repo
     if ($Ref) { $source = "$Repo#$Ref" }
+    # HARNESS_SOURCE overrides the marketplace source (a local checkout or owner/repo#ref), for testing.
+    if ($env:HARNESS_SOURCE) { $source = $env:HARNESS_SOURCE }
     Write-Host 'Installing the plugin ...'
     & claude plugin marketplace add $source | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "Could not add the marketplace $source"; return }

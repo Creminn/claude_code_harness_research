@@ -6,7 +6,8 @@
 param([switch]$Purge)
 
 function Uninstall-Harness {
-    $shim = Join-Path $HOME '.claude-harness\bin\harness.mjs'
+    $harnessDir = if ($env:HARNESS_HOME) { $env:HARNESS_HOME } else { Join-Path $HOME '.claude-harness' }
+    $shim = Join-Path $harnessDir 'bin\harness.mjs'
     if ((Get-Command node -ErrorAction SilentlyContinue) -and (Test-Path $shim)) {
         $uninstallArgs = @('uninstall', '--yes')
         if ($Purge) { $uninstallArgs += '--purge' }
@@ -19,7 +20,7 @@ function Uninstall-Harness {
         & claude plugin uninstall harness@claude-harness --scope user
         & claude plugin marketplace remove claude-harness
     }
-    if ($Purge) { Remove-Item -Recurse -Force (Join-Path $HOME '.claude-harness') -ErrorAction SilentlyContinue }
+    if ($Purge) { Remove-Item -Recurse -Force $harnessDir -ErrorAction SilentlyContinue }
     Write-Host 'Done. If you had enabled the harness, check the model, effortLevel, autoCompactWindow and statusLine keys in your settings files.'
 }
 

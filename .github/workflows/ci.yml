@@ -68,6 +68,59 @@ jobs:
             if ($errors) { $errors | ForEach-Object { Write-Error "${f}: $_" }; exit 1 }
           }
 
+  installer-e2e:
+    name: Installer end to end (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Use isolated config directories and install from this checkout
+        shell: bash
+        run: |
+          {
+            echo "CLAUDE_CONFIG_DIR=$RUNNER_TEMP/claude"
+            echo "HARNESS_HOME=$RUNNER_TEMP/harness"
+            echo "HARNESS_SOURCE=$GITHUB_WORKSPACE"
+            echo "TEST_REPO=$RUNNER_TEMP/repo"
+          } >> "$GITHUB_ENV"
+      - name: Install (bash)
+        if: runner.os != 'Windows'
+        run: bash install.sh --mode off --yes
+      - name: Install (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\install.ps1 -Mode off -Yes
+      - name: Enable in a project
+        shell: bash
+        run: |
+          mkdir -p "$TEST_REPO"
+          git -C "$TEST_REPO" init -q
+          node "$HARNESS_HOME/bin/harness.mjs" enable --scope project --profile economy --project "$TEST_REPO"
+          node .github/scripts/installer-check.mjs enabled "$TEST_REPO"
+      - name: Disable
+        shell: bash
+        run: |
+          node "$HARNESS_HOME/bin/harness.mjs" disable --scope project --project "$TEST_REPO"
+          node .github/scripts/installer-check.mjs disabled "$TEST_REPO"
+      - name: Uninstall (bash)
+        if: runner.os != 'Windows'
+        run: bash uninstall.sh
+      - name: Uninstall (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\uninstall.ps1
+      - name: The plugin is gone
+        shell: bash
+        run: node .github/scripts/installer-check.mjs uninstalled
+
   graph-smoke:
     name: Knowledge graph smoke test (real Graphiti image)
     runs-on: ubuntu-latest

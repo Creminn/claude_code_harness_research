@@ -209,6 +209,10 @@ cd plugins/harness && node --test        # unit and hook tests (no Docker needed
 claude plugin validate plugins/harness   # manifest, agents, skills
 ```
 
+To try the installer against a local checkout or a fork, set `HARNESS_SOURCE` to a path or
+an `owner/repo#ref`, for example `HARNESS_SOURCE=$PWD bash install.sh`. CI does this on
+macOS, Linux and Windows (Windows PowerShell 5.1), then enables, disables and uninstalls.
+
 Repository layout:
 - `.claude-plugin/marketplace.json`: the marketplace
 - `plugins/harness/`: the plugin

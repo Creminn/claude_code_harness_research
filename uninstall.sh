@@ -15,7 +15,8 @@ for arg in "$@"; do
   esac
 done
 
-SHIM="$HOME/.claude-harness/bin/harness.mjs"
+HARNESS_DIR="${HARNESS_HOME:-$HOME/.claude-harness}"
+SHIM="$HARNESS_DIR/bin/harness.mjs"
 # shellcheck disable=SC2086  # $PURGE is empty or one flag
 if command -v node >/dev/null 2>&1 && [ -f "$SHIM" ] && node "$SHIM" uninstall --yes $PURGE; then
   exit 0
@@ -26,5 +27,5 @@ if command -v claude >/dev/null 2>&1; then
   claude plugin uninstall harness@claude-harness --scope user || true
   claude plugin marketplace remove claude-harness || true
 fi
-if [ -n "$PURGE" ]; then rm -rf "$HOME/.claude-harness"; fi
+if [ -n "$PURGE" ]; then rm -rf "$HARNESS_DIR"; fi
 echo "Done. If you had enabled the harness, check the model, effortLevel, autoCompactWindow and statusLine keys in your settings files."

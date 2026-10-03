@@ -105,6 +105,8 @@ say ""
 # 2. Plugin ------------------------------------------------------------------
 SOURCE="$REPO"
 [ -n "$REF" ] && SOURCE="$REPO#$REF"
+# HARNESS_SOURCE overrides the marketplace source (a local checkout or owner/repo#ref), for testing.
+[ -n "${HARNESS_SOURCE:-}" ] && SOURCE="$HARNESS_SOURCE"
 say "Installing the plugin ..."
 claude plugin marketplace add "$SOURCE" >/dev/null
 claude plugin marketplace update "$MARKETPLACE" >/dev/null 2>&1 || true
