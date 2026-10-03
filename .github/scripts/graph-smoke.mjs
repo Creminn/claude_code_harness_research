@@ -28,7 +28,7 @@ await withMcp(mcpUrl(config), { timeoutMs: 60000 }, async (client) => {
 });
 
 if (expectExtraction) {
-  const deadline = Date.now() + 8 * 60 * 1000;
+  const deadline = Date.now() + 40 * 60 * 1000;
   for (;;) {
     const nodes = await withMcp(mcpUrl(config), { timeoutMs: 60000 }, (c) => c.callTool('search_nodes', { query: 'Redis sessions', group_ids: [group], max_nodes: 5 }));
     const found = nodes?.nodes || [];
@@ -38,7 +38,7 @@ if (expectExtraction) {
     if (Date.now() > deadline) {
       throw new Error(found.length
         ? 'only irrelevant entities were extracted: the local model is too small for reliable extraction'
-        : 'no facts were extracted within 8 minutes');
+        : 'no facts were extracted within 40 minutes');
     }
     await new Promise((r) => setTimeout(r, 10000));
   }

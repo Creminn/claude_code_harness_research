@@ -3,6 +3,11 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      local_model:
+        description: Ollama model for the local-mode end-to-end job
+        default: qwen2.5:7b
 
 jobs:
   test:
@@ -95,10 +100,13 @@ jobs:
         if: always()
         run: node plugins/harness/scripts/harness.mjs graph down --purge || true
 
+  # Slow (CPU-only extraction) and model-dependent, so it only runs when started by hand
+  # from the Actions tab: small models extract irrelevant facts and fail this check.
   graph-local:
     name: Knowledge graph end to end, local mode (experimental)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 60
     env:
       HARNESS_SKIP_CLAUDE: '1'
     steps:
@@ -109,7 +117,7 @@ jobs:
       - name: Use a temporary harness home
         run: echo "HARNESS_HOME=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
       - name: Set up the graph in local mode with a small model
-        run: node plugins/harness/scripts/harness.mjs graph setup --mode local --ollama sidecar --llm-model qwen2.5:1.5b
+        run: node plugins/harness/scripts/harness.mjs graph setup --mode local --ollama sidecar --llm-model "${{ inputs.local_model }}"
       - name: Write, extract and search
         run: node .github/scripts/graph-smoke.mjs --expect-extraction
       - name: Graph logs
