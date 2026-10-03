@@ -137,6 +137,12 @@ about 800 tokens to each session for the agent and skill descriptions.
 - `"recall": true` in `~/.claude-harness/config.json` also adds related facts to each prompt.
   This is off by default.
 
+**Compatibility shim.** Graphiti 1.1.0 calls the Anthropic SDK with an argument the bundled
+SDK no longer accepts, which breaks extraction in `anthropic` mode. The harness mounts a
+small `sitecustomize.py` that removes that argument
+(`plugins/harness/graph/patches/sitecustomize.py`). It does nothing once Graphiti fixes the
+call upstream.
+
 **Safety.**
 - The graph server listens only on `127.0.0.1:18000`.
 - The database port is never published.

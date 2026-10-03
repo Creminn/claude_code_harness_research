@@ -163,6 +163,8 @@ export function writeGraphFiles(config, secrets = readGraphEnv()) {
   const dir = ensureDir(paths.graphDir(), 0o700);
   copyFileSync(join(PLUGIN_ROOT, 'graph', 'compose.yml'), join(dir, 'compose.yml'));
   copyFileSync(join(PLUGIN_ROOT, 'graph', 'compose.ui.yml'), join(dir, 'compose.ui.yml'));
+  ensureDir(join(dir, 'patches'));
+  copyFileSync(join(PLUGIN_ROOT, 'graph', 'patches', 'sitecustomize.py'), join(dir, 'patches', 'sitecustomize.py'));
   writeFileAtomic(join(dir, 'config.yaml'), renderGraphitiConfig(config));
   writeFileAtomic(paths.graphEnv(), renderEnv(config, secrets), { mode: 0o600 });
 }
@@ -222,11 +224,16 @@ async function pullOllamaModels(config, say) {
   for (const model of models) {
     say(`Pulling Ollama model ${model} (first time only) ...`);
     if (config.ollama === 'host') {
-      const res = await fetch('http://127.0.0.1:11434/api/pull', {
-        method: 'POST',
-        body: JSON.stringify({ model, stream: false }),
-        signal: AbortSignal.timeout(30 * 60 * 1000),
-      });
+      let res;
+      try {
+        res = await fetch('http://127.0.0.1:11434/api/pull', {
+          method: 'POST',
+          body: JSON.stringify({ model, stream: false }),
+          signal: AbortSignal.timeout(30 * 60 * 1000),
+        });
+      } catch {
+        throw new Error('Ollama is not running on this machine (http://127.0.0.1:11434). Start it, or run "harness graph setup --ollama sidecar" to use a container instead.');
+      }
       if (!res.ok) throw new Error(`Host Ollama could not pull ${model}: HTTP ${res.status}`);
     } else {
       await waitFor(async () => spawnSync('docker', [...composeArgs(config), 'exec', '-T', 'ollama', 'ollama', 'list'], { stdio: 'ignore', windowsHide: true }).status === 0, 60000);

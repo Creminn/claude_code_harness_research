@@ -79,6 +79,39 @@ jobs:
         run: echo "sk-ant-dummy-key-for-ci-smoke-test" | node plugins/harness/scripts/harness.mjs graph setup --mode anthropic --key-stdin --ollama sidecar
       - name: Smoke test through the harness MCP client
         run: node .github/scripts/graph-smoke.mjs
+      - name: Extraction reaches the Anthropic API (the SDK shim works)
+        run: |
+          sleep 15
+          node plugins/harness/scripts/harness.mjs graph logs > graph.log 2>&1 || true
+          grep -E "anthropic|Failed to process" graph.log || true
+          if grep -q "unexpected keyword argument" graph.log; then
+            echo "::error::Graphiti's Anthropic client is incompatible with the bundled SDK"
+            exit 1
+          fi
+      - name: Graph logs
+        if: always()
+        run: node plugins/harness/scripts/harness.mjs graph logs || true
+      - name: Tear down
+        if: always()
+        run: node plugins/harness/scripts/harness.mjs graph down --purge || true
+
+  graph-local:
+    name: Knowledge graph end to end, local mode (experimental)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      HARNESS_SKIP_CLAUDE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Use a temporary harness home
+        run: echo "HARNESS_HOME=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: Set up the graph in local mode with a small model
+        run: node plugins/harness/scripts/harness.mjs graph setup --mode local --ollama sidecar --llm-model qwen2.5:1.5b
+      - name: Write, extract and search
+        run: node .github/scripts/graph-smoke.mjs --expect-extraction
       - name: Graph logs
         if: always()
         run: node plugins/harness/scripts/harness.mjs graph logs || true

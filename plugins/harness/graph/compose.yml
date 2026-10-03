@@ -13,9 +13,12 @@ services:
       BROWSER: "1"
       FALKORDB_URI: "redis://localhost:6379"
       FALKORDB_DATABASE: "default_db"
+      # Loads patches/sitecustomize.py (an Anthropic SDK compatibility shim).
+      PYTHONPATH: "/app/harness-patches"
     volumes:
       - graph_data:/var/lib/falkordb/data
       - ./config.yaml:/app/mcp/config/config.yaml:ro
+      - ./patches:/app/harness-patches:ro
     ports:
       # Localhost only. The FalkorDB port (6379) is never published.
       - "127.0.0.1:${HARNESS_MCP_PORT:-18000}:8000"

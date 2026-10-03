@@ -39,5 +39,6 @@ test('.env round-trips and is private', (t) => {
   assert.equal(env.OPENAI_BASE_URL, 'http://ollama:11434/v1');
   if (process.platform !== 'win32') assert.equal(statSync(paths.graphEnv()).mode & 0o777, 0o600);
   assert.ok(readFileSync(join(paths.graphDir(), 'compose.yml'), 'utf8').includes('zepai/knowledge-graph-mcp'));
+  assert.match(readFileSync(join(paths.graphDir(), 'patches', 'sitecustomize.py'), 'utf8'), /temperature/);
   assert.ok(!renderEnv({ ...base, graphMode: 'openai' }, { OPENAI_API_KEY: 'k' }).includes('OPENAI_BASE_URL'));
 });
