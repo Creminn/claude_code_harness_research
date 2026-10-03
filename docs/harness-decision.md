@@ -231,6 +231,76 @@ not a graph.
 | Model gateways | [claude-code-router](https://github.com/musistudio/claude-code-router), [LiteLLM](https://github.com/BerriAI/litellm) | Only needed for non-Anthropic models or central budgets |
 | Token hygiene | [rtk](https://github.com/rtk-ai/rtk), [claude-hud](https://github.com/jarrodwatts/claude-hud), [ccusage](https://github.com/ccusage/ccusage) | Native `/context` and `/usage` cover much of this |
 
+## Add-ons evaluated: MoFlo and Archon
+
+The two operate at different layers, so the answers differ:
+
+```
+ Process layer (optional, later)   Archon: YAML DAG runs, one worktree per run, Slack/GitHub triggers
+            │ launches Claude Code
+ Session layer (the plan)          Claude Code + your plugin: agents, model and effort, hooks, workflows
+            │ MCP
+ Memory layer (the plan)           Graphiti
+```
+
+MoFlo would occupy the session and memory layers too, which is why it collides with the plan.
+
+### MoFlo: don't add it
+
+[eric-cielo/moflo](https://github.com/eric-cielo/moflo) is MIT-licensed, has about 18 stars, and
+started as a fork of Claude Flow.
+
+| What it does | Conflict with this plan |
+|---|---|
+| Vector memory in SQLite (HNSW, local MiniLM embeddings) | A **second memory system**. It hooks the same events as the Graphiti hooks (`SessionStart`, `PreCompact`, `UserPromptSubmit`, …): 26 hooks across 8 events. That means double injections and hooks fighting each other |
+| Learned routing: task to agent type, by vector similarity | Native subagent `description` matching already does this. Choosing a model is a separate, optional switch |
+| Gates: memory search before `Glob`, `Grep` or `Read`; a task must exist before work starts | Opinionated *blocking* that adds tool calls and can loop |
+| Context-depletion warnings | Already covered by `statusLine` and `/context` |
+| `flo init` adds a section to CLAUDE.md, writes hooks to settings.json, and registers 80+ MCP tools | Goes against keeping CLAUDE.md lean and the tool surface small |
+| Maturity | One maintainer, very few users. It inherits the Ruflo design style |
+
+**Ideas worth borrowing into the plugin:**
+
+- A *soft* "check the graph before exploring" hint: a `PreToolUse` reminder, not a block.
+- A test-to-source map.
+- Context bands (fresh, moderate, depleted) shown in the status line.
+
+### Archon: not now; maybe later as an outer layer
+
+[coleam00/Archon](https://github.com/coleam00/archon) is MIT-licensed TypeScript with about 23.6k stars.
+It was rewritten in April 2026. The old Python RAG and task-manager Archon is archived, so
+tutorials about it no longer apply.
+
+**What it adds:**
+
+- YAML DAG workflows: plan, implement, validate, review, PR.
+- A git worktree for every run.
+- `fresh_context` per node, which suits the token goal.
+- A CLI and web UI.
+- Triggers from Slack, Telegram, Discord and GitHub.
+- Codex and Pi besides Claude Code.
+- 19 bundled workflows and a `--dry-run` mode.
+
+**Why not now:**
+
+1. **It overlaps with native dynamic workflows.** Claude Code now runs saved workflow scripts
+   from `.claude/workflows/`, and a plugin can ship them. Each `agent()` call can name its own
+   model, which follows the subagent model order. Intermediate results stay in script
+   variables, not in your context, and runs can be resumed. Those scripts run inside *your*
+   plugin, with your agents, hooks and Graphiti.
+2. **Capability isolation (v0.9).** Claude nodes no longer inherit ambient skills and MCP
+   servers. Graphiti would have to be declared in every workflow. It is also unverified whether
+   plugin hooks fire inside Archon runs, so add an explicit final node that writes to the graph,
+   or Archon runs leave no trace there.
+3. **Per-node model and effort for Claude nodes** could not be confirmed in the docs that were
+   reachable.
+4. **Cost and maturity.** One review reports $5–10 per multi-agent run. There are about 300 open
+   issues against a young rewrite.
+
+**When it becomes logical:** you want unattended issue-to-PR runs in parallel, started from
+GitHub, Slack or a phone, possibly mixing in Codex. Then Archon drives runs from the outside
+and this plugin plus Graphiti stays the layer inside each session.
+
 ## When to build more yourself
 
 Write a thin driver on the Claude Agent SDK only if you need one of these:
@@ -276,3 +346,4 @@ on every machine.
 - Context window: <https://code.claude.com/docs/en/context-window>
 - Plugins: <https://code.claude.com/docs/en/plugins>
 - Agent SDK: <https://code.claude.com/docs/en/agent-sdk/typescript>, <https://code.claude.com/docs/en/agent-sdk/python>
+- Dynamic workflows: <https://code.claude.com/docs/en/workflows>
