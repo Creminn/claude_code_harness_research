@@ -32,11 +32,14 @@ if (expectExtraction) {
   for (;;) {
     const nodes = await withMcp(mcpUrl(config), { timeoutMs: 60000 }, (c) => c.callTool('search_nodes', { query: 'Redis sessions', group_ids: [group], max_nodes: 5 }));
     const found = nodes?.nodes || [];
-    if (found.length) {
-      console.log('extracted nodes:', found.map((n) => n.name).join(', '));
-      break;
+    const relevant = found.filter((n) => /redis|session/i.test(`${n.name} ${n.summary || ''}`));
+    if (found.length) console.log('extracted nodes:', found.map((n) => n.name).join(', '));
+    if (relevant.length) break;
+    if (Date.now() > deadline) {
+      throw new Error(found.length
+        ? 'only irrelevant entities were extracted: the local model is too small for reliable extraction'
+        : 'no facts were extracted within 8 minutes');
     }
-    if (Date.now() > deadline) throw new Error('no facts were extracted within 8 minutes');
     await new Promise((r) => setTimeout(r, 10000));
   }
 }

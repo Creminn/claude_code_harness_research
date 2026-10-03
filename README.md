@@ -121,6 +121,10 @@ about 800 tokens to each session for the agent and skill descriptions.
 
 - **Ollama:** if Ollama is already running on your machine, the harness uses it instead of a
   container. That is much faster on a Mac.
+- **Local mode is experimental.** In CI, a 1.5B model on CPU took about 5 minutes per
+  episode and extracted irrelevant entities. Use at least a 7B model (the default), ideally
+  on a host Ollama with a GPU or Apple Silicon. Choose another model with
+  `harness graph setup --mode local --llm-model <model>`.
 - **API keys:** these are API keys, separate from a Claude subscription. Extraction runs a few
   times per long session, on the cheapest model.
 
